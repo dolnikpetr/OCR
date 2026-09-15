@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#08111d">
+  <title>České OCR</title>
+  <style>
+    :root{--bg:#08111d;--panel:#0d1928;--line:#26384d;--text:#eef4fb;--muted:#9aaabd;--green:#16d66a;--red:#ef4444}
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    body{min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
+    button{border:0;border-radius:14px;padding:13px 18px;font-size:16px;font-weight:650;color:white;background:#18273a;cursor:pointer}
+    button:disabled{opacity:.45;cursor:not-allowed}
+    .header{padding:18px 20px 14px;text-align:center;border-bottom:1px solid var(--line)}
+    h1{margin:0;font-size:28px}.sub{color:var(--muted);margin-top:5px}
+    .camera{position:relative;background:#000;width:100%;height:min(62vh,680px);min-height:330px;overflow:hidden}
+    video{width:100%;height:100%;object-fit:cover;display:block}
+    .overlay{position:absolute;inset:0;pointer-events:none}
+    .scan{position:absolute;left:8%;right:8%;top:15%;bottom:15%;border:1px solid rgba(255,255,255,.55)}
+    .scan:before,.scan:after{content:"";position:absolute;width:42px;height:42px;border-color:var(--green);border-style:solid}
+    .scan:before{left:-2px;top:-2px;border-width:5px 0 0 5px;border-radius:8px 0 0 0}
+    .scan:after{right:-2px;bottom:-2px;border-width:0 5px 5px 0;border-radius:0 0 8px 0}
+    .corner2,.corner3{position:absolute;width:42px;height:42px;border-color:var(--green);border-style:solid}
+    .corner2{right:-2px;top:-2px;border-width:5px 5px 0 0;border-radius:0 8px 0 0}
+    .corner3{left:-2px;bottom:-2px;border-width:0 0 5px 5px;border-radius:0 0 0 8px}
+    .hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;background:rgba(0,0,0,.4);padding:10px 16px;border-radius:12px;white-space:nowrap}
+    .camera-controls{position:absolute;bottom:18px;left:0;right:0;display:flex;justify-content:center;gap:10px}
+    .primary{background:var(--green);color:#06130b}.danger{background:var(--red)}.wide{min-width:190px}
+    .statusbar{display:grid;grid-template-columns:1.3fr repeat(4,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+    .stat{background:var(--bg);padding:13px 14px}.label{font-size:12px;color:var(--muted)}.value{font-size:17px;margin-top:3px}
+    .ok{color:var(--green);font-weight:700}
+    .controls,.text-panel,.debug{margin:14px 20px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap}.controls button{flex:1;min-width:150px}
+    .text-panel{border:1px solid var(--line);border-radius:16px;padding:16px;background:linear-gradient(180deg,#0d1928,#0a1421)}
+    .text-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.text-head b{font-size:18px}
+    textarea{width:100%;min-height:260px;resize:vertical;border:1px solid var(--line);border-radius:12px;background:#09131f;color:var(--text);padding:14px;font:16px/1.55 system-ui;outline:none}
+    details{border:1px solid var(--line);border-radius:16px;padding:12px 15px;background:#0b1725}
+    summary{cursor:pointer;font-weight:650}.debuggrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px;color:var(--muted);font-size:13px}
+    .error{color:#ff8c8c}.hidden{display:none!important}
+    @media(max-width:650px){.header{padding-top:calc(12px + env(safe-area-inset-top))}.statusbar{grid-template-columns:1fr 1fr}.stat{padding:10px 12px}.controls,.text-panel,.debug{margin-left:12px;margin-right:12px}.camera{height:55vh}}
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>České OCR</h1>
+    <div class="sub">Namiřte kameru na text a nechte ho vytěžit</div>
+  </header>
+
+  <section class="camera">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="overlay">
+      <div class="scan"><span class="corner2"></span><span class="corner3"></span>
+        <div class="hint" id="hint">Namiřte na dokument s českým textem</div>
+      </div>
+    </div>
+    <div class="camera-controls">
+      <button id="cameraBtn" class="primary wide">📷 Spustit kameru</button>
+      <button id="torchBtn" class="hidden">🔦 Světlo</button>
+    </div>
+  </section>
+
+  <canvas id="canvas" class="hidden"></canvas>
+
+  <section class="statusbar">
+    <div class="stat"><div class="label">STAV</div><div class="value ok" id="status">Čekám</div></div>
+    <div class="stat"><div class="label">POSLEDNÍ OCR</div><div class="value" id="lastOcr">—</div></div>
+    <div class="stat"><div class="label">CONFIDENCE</div><div class="value" id="confidence">—</div></div>
+    <div class="stat"><div class="label">BLOKY</div><div class="value" id="blocks">0</div></div>
+    <div class="stat"><div class="label">OCR CYKLY</div><div class="value" id="cycles">0</div></div>
+  </section>
+
+  <section class="controls">
+    <button id="ocrBtn" class="primary" disabled>▶ Spustit OCR</button>
+    <button id="pauseBtn" disabled>Ⅱ Pozastavit</button>
+    <button id="clearBtn" class="danger">🗑 Vymazat text</button>
+  </section>
+
+  <section class="text-panel">
+    <div class="text-head"><b>VYTAŽENÝ TEXT</b><button id="copyBtn">📋 Kopírovat vše</button></div>
+    <textarea id="output" placeholder="Zde se bude průběžně objevovat rozpoznaný text…"></textarea>
+  </section>
+
+  <section class="debug">
+    <details>
+      <summary>Debug informace</summary>
+      <div class="debuggrid">
+        <div>Kamera: <span id="camInfo">—</span></div>
+        <div>Canvas: <span id="canvasInfo">—</span></div>
+        <div>Poslední OCR: <span id="duration">—</span></div>
+        <div>Uložené bloky: <span id="stored">0</span></div>
+        <div>Similarity práh: 88 %</div>
+        <div>Tesseract: <span id="tess">nenačten</span></div>
+      </div>
+    </details>
+  </section>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const output = document.getElementById('output');
+  const cameraBtn = document.getElementById('cameraBtn');
+  const torchBtn = document.getElementById('torchBtn');
+  const ocrBtn = document.getElementById('ocrBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const statusEl = document.getElementById('status');
+  const hint = document.getElementById('hint');
+
+  let stream = null, track = null, worker = null;
+  let cameraReady = false, ocrRunning = false, ocrBusy = false;
+  let timer = null, cycles = 0, blocks = [];
+  const OCR_INTERVAL = 1800;
+  const SIMILARITY_THRESHOLD = 0.88;
+
+  const $ = id => document.getElementById(id);
+  const setStatus = (s, error=false) => { statusEl.textContent=s; statusEl.className='value '+(error?'error':'ok'); };
+
+  function normalize(s){
+    return s.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
+      .replace(/\\r/g,'\\n').replace(/[ \\t]+/g,' ').replace(/\\n\\s*\\n+/g,'\\n').trim();
+  }
+
+  function levenshtein(a,b){
+    if(a===b)return 0;
+    if(!a.length)return b.length;if(!b.length)return a.length;
+    let prev=Array.from({length:b.length+1},(_,i)=>i);
+    for(let i=0;i<a.length;i++){
+      const cur=[i+1];
+      for(let j=0;j<b.length;j++)
+        cur[j+1]=Math.min(cur[j]+1,prev[j+1]+1,prev[j]+(a[i]===b[j]?0:1));
+      prev=cur;
+    }
+    return prev[b.length];
+  }
+  function similarity(a,b){
+    a=normalize(a);b=normalize(b);
+    if(!a||!b)return 0;
+    return 1-levenshtein(a,b)/Math.max(a.length,b.length);
+  }
+
+  function addBlocksFromOCR(data){
+    const lines = (data.lines || []).map(x=>x.text.trim()).filter(x=>x.length>=2);
+    const candidates = lines.length ? lines : (data.text||'').split(/\\n+/).map(x=>x.trim()).filter(x=>x.length>=2);
+    let added=false;
+    for(const text of candidates){
+      const n=normalize(text);
+      if(n.length<2)continue;
+      const exists=blocks.some(b=>similarity(b,text)>=SIMILARITY_THRESHOLD);
+      if(!exists){ blocks.push(text); added=true; }
+    }
+    if(added) output.value=blocks.join('\\n');
+    $('blocks').textContent=blocks.length;
+    $('stored').textContent=blocks.length;
+  }
+
+  function preprocess(){
+    const vw=video.videoWidth, vh=video.videoHeight;
+    if(!vw||!vh) return false;
+    const scale=Math.min(1, 1200/vw);
+    canvas.width=Math.round(vw*scale); canvas.height=Math.round(vh*scale);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const img=ctx.getImageData(0,0,canvas.width,canvas.height), d=img.data;
+    for(let i=0;i<d.length;i+=4){
+      const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+      const c=Math.max(0,Math.min(255,(g-128)*1.35+128));
+      d[i]=d[i+1]=d[i+2]=c;
+    }
+    ctx.putImageData(img,0,0);
+    $('canvasInfo').textContent=canvas.width+'×'+canvas.height;
+    return true;
+  }
+
+  async function initWorker(){
+    if(worker)return;
+    setStatus('Inicializace OCR…');
+    $('tess').textContent='načítám…';
+    try{
+      worker=await Tesseract.createWorker('ces', 1, {
+        logger:m=>{
+          if(m.status) $('tess').textContent=m.status+(m.progress!=null?' '+Math.round(m.progress*100)+'%':'');
+        },
+        langPath:'https://tessdata.projectnaptha.com/4.0.0/'
+      });
+      await worker.setParameters({
+        tessedit_pageseg_mode:'6',
+        preserve_interword_spaces:'1'
+      });
+      $('tess').textContent='ces připraveno';
+      setStatus('Připraveno');
+    }catch(e){
+      console.error(e); setStatus('OCR chyba',true);
+      $('tess').textContent='chyba';
+      throw e;
+    }
+  }
+
+  async function startCamera(){
+    if(!navigator.mediaDevices?.getUserMedia){
+      setStatus('Kamera není podporována',true); return;
+    }
+    try{
+      if(stream) stream.getTracks().forEach(t=>t.stop());
+      stream=await navigator.mediaDevices.getUserMedia({
+        audio:false,
+        video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}
+      });
+      video.srcObject=stream;
+      await video.play();
+      track=stream.getVideoTracks()[0];
+      cameraReady=true;
+      const s=track.getSettings();
+      $('camInfo').textContent=(s.width||video.videoWidth)+'×'+(s.height||video.videoHeight);
+      cameraBtn.textContent='📷 Kamera aktivní';
+      cameraBtn.disabled=true;
+      hint.textContent='OCR oblast';
+      ocrBtn.disabled=false;
+      pauseBtn.disabled=false;
+      if(track.getCapabilities?.().torch) torchBtn.classList.remove('hidden');
+      await initWorker();
+      startOCR();
+    }catch(e){
+      console.error(e);
+      setStatus(e.name==='NotAllowedError'?'Povolte přístup ke kameře':'Kameru se nepodařilo spustit',true);
+      hint.textContent='Povolte přístup ke kameře a zkuste to znovu';
+    }
+  }
+
+  async function runOCR(){
+    if(!cameraReady||ocrBusy||!ocrRunning||!worker)return;
+    if(!preprocess())return;
+    ocrBusy=true; setStatus('Rozpoznávám…');
+    const t=performance.now();
+    try{
+      const result=await worker.recognize(canvas);
+      const ms=Math.round(performance.now()-t);
+      const data=result.data||{};
+      const conf=Math.round(data.confidence||0);
+      $('confidence').textContent=conf+' %';
+      $('duration').textContent=ms+' ms';
+      $('lastOcr').textContent=new Date().toLocaleTimeString('cs-CZ');
+      cycles++; $('cycles').textContent=cycles;
+      if(conf>=35) addBlocksFromOCR(data);
+      setStatus('Připraveno');
+    }catch(e){console.error(e);setStatus('OCR chyba',true)}
+    finally{ocrBusy=false}
+  }
+
+  function startOCR(){
+    if(ocrRunning)return;
+    ocrRunning=true; ocrBtn.textContent='■ OCR běží'; pauseBtn.textContent='Ⅱ Pozastavit';
+    runOCR(); timer=setInterval(runOCR,OCR_INTERVAL);
+  }
+  function pauseOCR(){
+    ocrRunning=false;
+    clearInterval(timer); timer=null;
+    pauseBtn.textContent='▶ Pokračovat'; ocrBtn.textContent='▶ Spustit OCR';
+    setStatus('Pozastaveno');
+  }
+  ocrBtn.onclick=()=>ocrRunning?pauseOCR():startOCR();
+  pauseBtn.onclick=()=>ocrRunning?pauseOCR():startOCR();
+
+  cameraBtn.onclick=startCamera;
+  $('clearBtn').onclick=()=>{blocks=[];output.value='';$('blocks').textContent='0';$('stored').textContent='0'};
+  $('copyBtn').onclick=async()=>{
+    try{await navigator.clipboard.writeText(output.value);$('copyBtn').textContent='✓ Zkopírováno';setTimeout(()=>$('copyBtn').textContent='📋 Kopírovat vše',1200)}
+    catch(e){output.select();document.execCommand('copy')}
+  };
+  torchBtn.onclick=async()=>{
+    try{
+      const cap=track.getCapabilities(); if(cap.torch) await track.applyConstraints({advanced:[{torch:true}]});
+      setTimeout(()=>track.applyConstraints({advanced:[{torch:false}]}).catch(()=>{}),1000);
+    }catch(e){}
+  };
+
+  // Browser security commonly prevents camera access until a user gesture.
+  // We still attempt automatically; if blocked, the visible button remains.
+  window.addEventListener('load',()=>setTimeout(startCamera,250));
+  window.addEventListener('beforeunload',()=>{
+    clearInterval(timer); if(stream)stream.getTracks().forEach(t=>t.stop()); if(worker)worker.terminate();
+  });
+})();
+</script>
+</body>
+</html>
